@@ -1,21 +1,21 @@
 # AI Agent
 
 A small command-line AI assistant built with LlamaIndex. The agent can answer
-questions about world population data, retrieve information from an Iran PDF
-document, and save user notes to a local text file.
+questions about world population data, retrieve information from indexed PDF
+documents, and save user notes to a local text file.
 
 The project is intentionally lightweight: data lives in the `data/` directory,
-the app runs from `main.py`, and generated indexes are persisted locally so they
-do not need to be rebuilt every time.
+the app runs from `main.py`, and PDF vectors are stored in PostgreSQL with
+pgvector so they do not need to be rebuilt every time.
 
 ## Features
 
 - Interactive CLI agent powered by LlamaIndex `ReActAgent`
 - OpenAI-compatible LLM configuration through `.env`
 - Population questions answered from `data/population.csv`
-- Iran document questions answered from `data/Iran.pdf`
+- PDF document questions answered from files in `data/`
 - Local note saving through a tool-backed `data/notes.txt` file
-- Persisted LlamaIndex storage in `Iran/` for faster startup after the first run
+- PostgreSQL/pgvector-backed PDF retrieval for faster startup after the first run
 
 ## Project Structure
 
@@ -26,6 +26,7 @@ AI-agent/
 |   |-- notes.txt
 |   `-- population.csv
 |-- main.py
+|-- vector_db.py
 |-- pdf.py
 |-- note_engine.py
 |-- pandas_query_engine.py
@@ -40,15 +41,18 @@ AI-agent/
 
 - `note_saver`: appends notes to `data/notes.txt`
 - `population_data`: queries the population CSV with a pandas query engine
-- `Iran_data`: queries the PDF-backed LlamaIndex engine for Iran-related details
+- `pdf_documents`: queries the PDF-backed LlamaIndex engine
 
-`pdf.py` loads `data/Iran.pdf` with `SimpleDirectoryReader`, builds a
-`SummaryIndex`, and persists the result in the local `Iran/` directory.
+`vector_db.py` owns the PostgreSQL/pgvector connection and vector-store helpers.
+`pdf.py` loads every PDF under `PDF_DATA_DIR`, adds `source`, `source_name`, and
+`source_type` metadata to each document, indexes only sources that are not
+already present in Postgres, and loads the existing vector table on later runs.
 
 ## Requirements
 
 - Python 3.12 or newer
 - `uv` for dependency management
+- PostgreSQL with the `pgvector` extension enabled
 - An OpenAI-compatible API key and model endpoint
 
 Dependencies are declared in `pyproject.toml`.
@@ -67,7 +71,14 @@ Create a `.env` file in the project root:
 API_KEY=your_api_key_here
 API_URL=https://your-openai-compatible-endpoint/v1
 API_MODEL=your-chat-model
-EMBED_MODEL=text-embedding-ada-002
+EMBED_MODEL=text-embedding-3-large
+EMBED_DIM=3072
+
+POSTGRES_URL=postgresql://postgres:password@localhost:5432/vector_db
+PGVECTOR_SCHEMA=public
+PGVECTOR_TABLE=documents
+PDF_DATA_DIR=data
+REBUILD_VECTOR_INDEX=false
 ```
 
 Notes:
@@ -75,8 +86,22 @@ Notes:
 - `API_KEY` is required for model calls.
 - `API_URL` is optional if you are using the default OpenAI endpoint.
 - `API_MODEL` should be a chat model supported by your provider.
-- `EMBED_MODEL` is read by `main.py`; the current PDF index uses `SummaryIndex`,
-  so embeddings are not required for building that PDF index.
+- `EMBED_DIM` must match your embedding model. Use `3072` for
+  `text-embedding-3-large`; use `1536` for `text-embedding-3-small` or
+  `text-embedding-ada-002`.
+- Each PDF chunk gets source metadata, for example
+  `source=data/Iran.pdf`, so later retrieval and debugging can identify where
+  the chunk came from.
+- Set `REBUILD_VECTOR_INDEX=true` once when you want to clear and rebuild the
+  Postgres vector table from the PDFs under `PDF_DATA_DIR`.
+
+Create the database and extension before running the app:
+
+```sql
+CREATE DATABASE vector_db;
+\c vector_db
+CREATE EXTENSION IF NOT EXISTS vector;
+```
 
 ## Run
 
@@ -116,7 +141,6 @@ Save a note that says: review the population data tomorrow.
 
 The app creates local runtime files:
 
-- `Iran/`: persisted LlamaIndex storage for the Iran PDF index
 - `data/notes.txt`: saved notes from the note tool
 - `__pycache__/`: Python bytecode cache
 

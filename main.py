@@ -34,7 +34,7 @@ llm = OpenAI(**llm_config)
 Settings.llm = llm
 Settings.embed_model = OpenAIEmbedding(**embed_config)
 
-from pdf import Iran_engine
+from pdf import document_engine
 
 population_path = os.path.join("data", "population.csv")
 population_df = pd.read_csv(population_path)
@@ -49,9 +49,9 @@ tools = [
         name="population_data",
         description="this gives information at the world population and demographics"
     )),
-    QueryEngineTool(query_engine=Iran_engine, metadata=ToolMetadata(
-        name="Iran_data",
-        description="this gives detailed information about Iran the country."
+    QueryEngineTool(query_engine=document_engine, metadata=ToolMetadata(
+        name="pdf_documents",
+        description="this answers questions using the indexed PDF documents."
     ))
 ]
 
