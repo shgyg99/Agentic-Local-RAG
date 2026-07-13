@@ -1,0 +1,54 @@
+services:
+  streamlit:
+    build:
+      context: .
+    image: ai-agent-streamlit:latest
+    container_name: ai-agent-streamlit
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      API_URL: ${API_URL}
+      API_KEY: ${API_KEY}
+      API_MODEL: ${API_MODEL}
+      EMBED_MODEL: ${EMBED_MODEL:-text-embedding-3-large}
+      EMBED_DIM: ${EMBED_DIM:-3072}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-vector_db}
+      POSTGRES_AUTO_CREATE_DB: "false"
+      PGVECTOR_SCHEMA: ${PGVECTOR_SCHEMA:-public}
+      PGVECTOR_TABLE: ${PGVECTOR_TABLE:-documents}
+      PDF_DATA_DIR: /app/data
+      REBUILD_VECTOR_INDEX: ${REBUILD_VECTOR_INDEX:-false}
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    volumes:
+      - ./data:/app/data
+
+  postgres:
+    build:
+      context: ./docker/postgres
+    image: ai-agent-postgres-pgvector:16
+    container_name: ai-agent-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vector_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - ai_agent_postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ai_agent_postgres_data:

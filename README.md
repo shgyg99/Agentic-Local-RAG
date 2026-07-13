@@ -1,21 +1,17 @@
 # AI Agent
 
-A small command-line AI assistant built with LlamaIndex. The agent can answer
-questions about world population data, retrieve information from indexed PDF
-documents, and save user notes to a local text file.
-
-The project is intentionally lightweight: data lives in the `data/` directory,
-the app runs from `main.py`, and PDF vectors are stored in PostgreSQL with
-pgvector so they do not need to be rebuilt every time.
+A small PDF RAG assistant built with LlamaIndex, Streamlit, and
+PostgreSQL/pgvector. Upload PDF files, store their embeddings in Postgres, and
+ask questions against the indexed documents.
 
 ## Features
 
-- Interactive CLI agent powered by LlamaIndex `ReActAgent`
+- Streamlit UI for PDF upload and document Q&A
+- Optional CLI agent in `main.py`
 - OpenAI-compatible LLM configuration through `.env`
-- Population questions answered from `data/population.csv`
-- PDF document questions answered from files in `data/`
+- PostgreSQL/pgvector-backed PDF retrieval
+- Source metadata stored for every PDF chunk
 - Local note saving through a tool-backed `data/notes.txt` file
-- PostgreSQL/pgvector-backed PDF retrieval for faster startup after the first run
 
 ## Project Structure
 
@@ -23,13 +19,13 @@ pgvector so they do not need to be rebuilt every time.
 AI-agent/
 |-- data/
 |   |-- Iran.pdf
-|   |-- notes.txt
-|   `-- population.csv
+|   `-- notes.txt
+|-- streamlit_app.py
 |-- main.py
+|-- llm_settings.py
 |-- vector_db.py
 |-- pdf.py
 |-- note_engine.py
-|-- pandas_query_engine.py
 |-- prompts.py
 |-- pyproject.toml
 `-- README.md
@@ -37,11 +33,8 @@ AI-agent/
 
 ## How It Works
 
-`main.py` creates a ReAct agent with three tools:
-
-- `note_saver`: appends notes to `data/notes.txt`
-- `population_data`: queries the population CSV with a pandas query engine
-- `pdf_documents`: queries the PDF-backed LlamaIndex engine
+`streamlit_app.py` saves uploaded PDF files into `PDF_DATA_DIR`, then calls the
+PDF indexing flow.
 
 `vector_db.py` owns the PostgreSQL/pgvector connection and vector-store helpers.
 `pdf.py` loads every PDF under `PDF_DATA_DIR`, adds `source`, `source_name`, and
@@ -54,8 +47,6 @@ already present in Postgres, and loads the existing vector table on later runs.
 - `uv` for dependency management
 - PostgreSQL with the `pgvector` extension enabled
 - An OpenAI-compatible API key and model endpoint
-
-Dependencies are declared in `pyproject.toml`.
 
 ## Setup
 
@@ -74,28 +65,53 @@ API_MODEL=your-chat-model
 EMBED_MODEL=text-embedding-3-large
 EMBED_DIM=3072
 
-POSTGRES_URL=postgresql://postgres:password@localhost:5432/vector_db
+# Optional. If omitted, the app builds a local URL from the values below.
+# POSTGRES_URL=postgresql://postgres:your_real_password@localhost:5432/vector_db
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5433
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your_real_password
+POSTGRES_DB=vector_db
+POSTGRES_AUTO_CREATE_DB=true
 PGVECTOR_SCHEMA=public
 PGVECTOR_TABLE=documents
 PDF_DATA_DIR=data
 REBUILD_VECTOR_INDEX=false
+STREAMLIT_PORT=8501
 ```
 
-Notes:
+If `POSTGRES_URL` is not set, the app uses the local Postgres settings above.
+The included Docker Compose service publishes Postgres on host port `5433` to
+avoid conflicts with a local Postgres installation on `5432`.
 
-- `API_KEY` is required for model calls.
-- `API_URL` is optional if you are using the default OpenAI endpoint.
-- `API_MODEL` should be a chat model supported by your provider.
-- `EMBED_DIM` must match your embedding model. Use `3072` for
-  `text-embedding-3-large`; use `1536` for `text-embedding-3-small` or
-  `text-embedding-ada-002`.
-- Each PDF chunk gets source metadata, for example
-  `source=data/Iran.pdf`, so later retrieval and debugging can identify where
-  the chunk came from.
-- Set `REBUILD_VECTOR_INDEX=true` once when you want to clear and rebuild the
-  Postgres vector table from the PDFs under `PDF_DATA_DIR`.
+Start the full Docker stack:
 
-Create the database and extension before running the app:
+```powershell
+docker compose up -d --build
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8501
+```
+
+Start only Postgres with pgvector:
+
+```powershell
+docker compose up -d postgres
+```
+
+Stop it:
+
+```powershell
+docker compose down
+```
+
+If `POSTGRES_URL` is set, automatic database creation only runs when
+`POSTGRES_AUTO_CREATE_DB=true`.
+
+If you create the database manually, run:
 
 ```sql
 CREATE DATABASE vector_db;
@@ -103,52 +119,45 @@ CREATE DATABASE vector_db;
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
+The app also runs `CREATE EXTENSION IF NOT EXISTS vector` through LlamaIndex
+when the connected user has permission.
+
+`EMBED_DIM` must match your embedding model. Use `3072` for
+`text-embedding-3-large`; use `1536` for `text-embedding-3-small` or
+`text-embedding-ada-002`.
+
+Set `REBUILD_VECTOR_INDEX=true` once when you want to clear and rebuild the
+Postgres vector table from the PDFs under `PDF_DATA_DIR`.
+
 ## Run
 
-Start the agent:
+Start the Streamlit app locally without Docker:
+
+```powershell
+uv run streamlit run streamlit_app.py
+```
+
+Or run the CLI agent:
 
 ```powershell
 uv run python main.py
 ```
 
-Then ask a question:
+## Source Metadata
 
-```text
-Enter a prompt (q to quit): What is the population of Iran?
-```
+Each PDF chunk stores metadata like this:
 
-Quit with:
-
-```text
-q
-```
-
-## Example Prompts
-
-```text
-What is the population of Iran?
-```
-
-```text
-Tell me something about Iran from the PDF.
-```
-
-```text
-Save a note that says: review the population data tomorrow.
+```python
+{
+    "source": "data/Iran.pdf",
+    "source_name": "Iran.pdf",
+    "source_type": "pdf",
+}
 ```
 
 ## Generated Files
 
-The app creates local runtime files:
-
 - `data/notes.txt`: saved notes from the note tool
 - `__pycache__/`: Python bytecode cache
-
-These are ignored by `.gitignore` where appropriate.
-
-## Security Notes
-
-The pandas query engine executes model-generated pandas expressions against the
-loaded dataframe. Use it only in a trusted local development environment.
 
 Do not commit `.env`, API keys, or private notes.
