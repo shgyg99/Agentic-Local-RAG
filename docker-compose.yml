@@ -1,4 +1,49 @@
 services:
+  api:
+    build:
+      context: .
+    image: ai-agent-api:latest
+    container_name: ai-agent-api
+    restart: unless-stopped
+    command:
+      [
+        ".venv/bin/uvicorn",
+        "apps.api.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+      ]
+    environment:
+      APP_NAME: ${APP_NAME:-EvidenceFlow}
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-vector_db}
+      POSTGRES_AUTO_CREATE_DB: "false"
+      PGVECTOR_SCHEMA: ${PGVECTOR_SCHEMA:-public}
+      PGVECTOR_TABLE: ${PGVECTOR_TABLE:-documents}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          ".venv/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   streamlit:
     build:
       context: .
@@ -9,6 +54,10 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      APP_NAME: ${APP_NAME:-EvidenceFlow}
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
       API_URL: ${API_URL}
       API_KEY: ${API_KEY}
       API_MODEL: ${API_MODEL}
@@ -28,6 +77,17 @@ services:
       - "${STREAMLIT_PORT:-8501}:8501"
     volumes:
       - ./data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          ".venv/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   postgres:
     build:

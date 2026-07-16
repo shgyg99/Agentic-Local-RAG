@@ -1,25 +1,25 @@
-import os
+import logging
 import re
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 from llama_index.core import Document, StorageContext, VectorStoreIndex
 from pypdf import PdfReader
 
-from vector_db import (
+from packages.core.settings import get_settings
+from packages.retrieval.vector_db import (
     clear_vector_store,
     delete_indexed_source,
-    env_flag,
     get_vector_store,
     indexed_ingestion_versions,
     indexed_sources,
 )
 
-
-PDF_DATA_DIR = Path(os.getenv("PDF_DATA_DIR", "data"))
 NUL_CHAR = "\x00"
 INGESTION_VERSION = "page_section_v1"
 MIN_SECTION_TEXT_LENGTH = 20
+logger = logging.getLogger(__name__)
 
 SECTION_ALIASES = {
     "abstract": "Abstract",
@@ -57,7 +57,7 @@ BLANK_LINES_RE = re.compile(r"\n{3,}")
 
 
 def pdf_data_dir() -> Path:
-    data_dir = Path(os.getenv("PDF_DATA_DIR", str(PDF_DATA_DIR)))
+    data_dir = get_settings().pdf_data_dir
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir
 
@@ -99,8 +99,7 @@ def clean_document(document):
         document.set_content(clean_text(content))
 
     document.metadata = {
-        key: clean_metadata_value(value)
-        for key, value in document.metadata.items()
+        key: clean_metadata_value(value) for key, value in document.metadata.items()
     }
     return document
 
@@ -118,11 +117,7 @@ def normalize_extracted_text(value: str) -> str:
 
 
 def page_lines(raw_text: str) -> list[str]:
-    return [
-        line
-        for line in (normalize_line(line) for line in raw_text.splitlines())
-        if line
-    ]
+    return [line for line in (normalize_line(line) for line in raw_text.splitlines()) if line]
 
 
 def repeated_margin_lines(pages: list[list[str]]) -> set[str]:
@@ -174,11 +169,11 @@ def heading_title(line: str) -> str | None:
     return canonical_section_title(match.group("title"))
 
 
-def document_pdf_metadata(reader: PdfReader) -> dict:
-    metadata = reader.metadata or {}
+def document_pdf_metadata(reader: PdfReader) -> dict[str, str]:
+    metadata: Any = reader.metadata or {}
     title = getattr(metadata, "title", None) or metadata.get("/Title")
     author = getattr(metadata, "author", None) or metadata.get("/Author")
-    values = {}
+    values: dict[str, str] = {}
     if title:
         values["title"] = clean_text(str(title))
     if author:
@@ -235,23 +230,23 @@ def extract_page_section_documents(file_path: Path) -> list[Document]:
             extracted_pages.append([])
 
     cleaned_pages = remove_repeated_headers_and_footers(extracted_pages)
-    documents = []
+    documents: list[Document] = []
     active_section = "Unsectioned"
     section_index = 0
 
     for page_index, lines in enumerate(cleaned_pages, start=1):
-        buffer = []
+        buffer: list[str] = []
 
-        def flush_buffer() -> None:
+        def flush_buffer(page_number: int, section_title: str) -> None:
             nonlocal section_index, buffer
             if not buffer:
                 return
             document = build_page_section_document(
                 file_path=file_path,
                 text="\n".join(buffer),
-                page_number=page_index,
+                page_number=page_number,
                 page_count=page_count,
-                section_title=active_section,
+                section_title=section_title,
                 section_index=section_index,
                 pdf_info=pdf_info,
             )
@@ -263,12 +258,12 @@ def extract_page_section_documents(file_path: Path) -> list[Document]:
         for line in lines:
             title = heading_title(line)
             if title:
-                flush_buffer()
+                flush_buffer(page_index, active_section)
                 active_section = title
                 continue
             buffer.append(line)
 
-        flush_buffer()
+        flush_buffer(page_index, active_section)
 
     return documents
 
@@ -321,15 +316,13 @@ def load_pdf_documents():
 
 def filter_new_documents(documents, known_sources: set[str]):
     return [
-        document
-        for document in documents
-        if document.metadata.get("source") not in known_sources
+        document for document in documents if document.metadata.get("source") not in known_sources
     ]
 
 
 def sync_pdf_index(index_name: str = "documents", rebuild: bool = False):
     vector_store = get_vector_store()
-    rebuild_index = rebuild or env_flag("REBUILD_VECTOR_INDEX")
+    rebuild_index = rebuild or get_settings().rebuild_vector_index
     known_sources = set()
     if not rebuild_index:
         known_sources = indexed_sources(vector_store)
@@ -337,7 +330,7 @@ def sync_pdf_index(index_name: str = "documents", rebuild: bool = False):
         rebuild_index = bool(known_sources) and versions != {INGESTION_VERSION}
 
     if rebuild_index:
-        print("clearing Postgres vector index", index_name)
+        logger.info("Clearing Postgres vector index %s", index_name)
         clear_vector_store(vector_store)
         known_sources = set()
 
@@ -346,7 +339,7 @@ def sync_pdf_index(index_name: str = "documents", rebuild: bool = False):
 
     if new_documents:
         sources = sorted({document.metadata["source"] for document in new_documents})
-        print("indexing PDF sources", sources)
+        logger.info("Indexing PDF sources %s", sources)
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
         VectorStoreIndex.from_documents(
             new_documents,
@@ -360,7 +353,7 @@ def sync_pdf_index(index_name: str = "documents", rebuild: bool = False):
             f"No indexed PDFs found. Upload or place PDF files in {pdf_data_dir()}."
         )
 
-    print("loading Postgres vector index", index_name)
+    logger.info("Loading Postgres vector index %s", index_name)
     return VectorStoreIndex.from_vector_store(vector_store=vector_store)
 
 

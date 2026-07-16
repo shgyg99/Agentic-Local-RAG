@@ -2,6 +2,11 @@
 .venv
 data/notes.txt
 __pycache__
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 Iran/
 mdFiles/
 data/

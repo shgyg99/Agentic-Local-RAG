@@ -1,15 +1,17 @@
-from llama_index.core.tools import FunctionTool
 import os
+
+from llama_index.core.tools import FunctionTool
 
 note_file = os.path.join("data", "notes.txt")
 
+
 def save_note(note):
     if not os.path.exists(note_file):
-        open(note_file, 'w')
-        
-    with open(note_file, 'a') as f:
+        open(note_file, "w").close()
+
+    with open(note_file, "a") as f:
         f.writelines([note + "\n"])
-        
+
     return "Note is saved"
 
 

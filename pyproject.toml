@@ -1,13 +1,52 @@
 [project]
 name = "ai-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "EvidenceFlow PDF RAG assistant"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.115.0",
     "llama-index>=0.14.23",
     "llama-index-vector-stores-postgres>=0.8.1",
+    "pydantic-settings>=2.7.0",
     "pypdf>=6.14.2",
     "python-dotenv>=1.2.2",
     "streamlit>=1.59.1",
+    "uvicorn[standard]>=0.32.0",
 ]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13.0",
+    "pre-commit>=4.0.0",
+    "pytest>=8.3.0",
+    "ruff>=0.8.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "data",
+    "vendor",
+]
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["apps", "packages", "tests"]
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -2,12 +2,16 @@ from pathlib import Path
 
 import streamlit as st
 
-from llm_settings import configure_llama_index
-from pdf import delete_pdf_source, get_query_engine, pdf_data_dir, pdf_paths
-from vector_db import get_vector_store, indexed_sources
+from packages.core.logging_config import configure_logging
+from packages.core.settings import get_settings
+from packages.ingestion.pdf import delete_pdf_source, get_query_engine, pdf_data_dir, pdf_paths
+from packages.llm.llama_index_settings import configure_llama_index
+from packages.retrieval.vector_db import get_vector_store, indexed_sources
 
+settings = get_settings()
+configure_logging(settings)
 
-st.set_page_config(page_title="PDF RAG", layout="wide")
+st.set_page_config(page_title=settings.app_name, layout="wide")
 
 
 def save_uploaded_files(uploaded_files) -> tuple[list[Path], bool]:
@@ -39,8 +43,7 @@ def delete_source(source: str) -> None:
     st.session_state.messages = []
     file_message = "deleted local PDF" if deleted_file else "local PDF was already missing"
     st.session_state.delete_message = (
-        f"Removed {Path(source).name}: {file_message}, "
-        f"deleted {deleted_chunks} indexed chunk(s)."
+        f"Removed {Path(source).name}: {file_message}, deleted {deleted_chunks} indexed chunk(s)."
     )
     st.rerun()
 
@@ -96,8 +99,10 @@ def show_evidence(source_node, index: int) -> None:
 
 configure_llama_index()
 
-st.title("PDF RAG")
-st.caption("Upload PDF files, store embeddings in Postgres/pgvector, and query the indexed documents.")
+st.title(settings.app_name)
+st.caption(
+    "Upload PDF files, store embeddings in Postgres/pgvector, and query the indexed documents."
+)
 
 with st.sidebar:
     st.header("Documents")

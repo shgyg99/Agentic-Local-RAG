@@ -7,6 +7,7 @@ ask questions against the indexed documents.
 ## Features
 
 - Streamlit UI for PDF upload and document Q&A
+- FastAPI health-check service for backend readiness
 - Optional CLI agent in `main.py`
 - OpenAI-compatible LLM configuration through `.env`
 - PostgreSQL/pgvector-backed PDF retrieval
@@ -17,30 +18,42 @@ ask questions against the indexed documents.
 
 ```text
 AI-agent/
+|-- apps/
+|   |-- api/
+|   `-- web/
+|-- packages/
+|   |-- ingestion/
+|   |-- retrieval/
+|   |-- llm/
+|   `-- evaluation/
+|-- infrastructure/
+|   `-- migrations/
+|-- tests/
+|-- docs/
 |-- data/
 |   |-- Iran.pdf
 |   `-- notes.txt
-|-- streamlit_app.py
-|-- main.py
-|-- llm_settings.py
-|-- vector_db.py
-|-- pdf.py
-|-- note_engine.py
-|-- prompts.py
+|-- docker/
 |-- pyproject.toml
 `-- README.md
 ```
 
 ## How It Works
 
-`streamlit_app.py` saves uploaded PDF files into `PDF_DATA_DIR`, then calls the
-PDF indexing flow.
+`apps/web/streamlit_app.py` saves uploaded PDF files into `PDF_DATA_DIR`, then
+calls the PDF indexing flow.
 
-`vector_db.py` owns the PostgreSQL/pgvector connection and vector-store helpers.
-`pdf.py` loads every PDF under `PDF_DATA_DIR`, extracts text page by page, splits
-page text when common academic section headings are detected, and stores page and
-section metadata with each indexed document. It indexes only sources that are not
-already present in Postgres, and loads the existing vector table on later runs.
+`packages/retrieval/vector_db.py` owns the PostgreSQL/pgvector connection and
+vector-store helpers. `packages/ingestion/pdf.py` loads every PDF under
+`PDF_DATA_DIR`, extracts text page by page, splits page text when common academic
+section headings are detected, and stores page and section metadata with each
+indexed document. It indexes only sources that are not already present in
+Postgres, and loads the existing vector table on later runs.
+
+`packages/core/settings.py` validates environment-driven configuration with
+Pydantic Settings. `packages/core/logging_config.py` configures JSON structured
+logging. `apps/api/main.py` exposes `/health` and a global exception handler for
+backend readiness checks.
 
 ## Requirements
 
@@ -65,6 +78,10 @@ API_URL=https://your-openai-compatible-endpoint/v1
 API_MODEL=your-chat-model
 EMBED_MODEL=text-embedding-3-large
 EMBED_DIM=3072
+APP_NAME=EvidenceFlow
+APP_ENV=development
+LOG_LEVEL=INFO
+LOG_FORMAT=json
 
 # Optional. If omitted, the app builds a local URL from the values below.
 # POSTGRES_URL=postgresql://postgres:your_real_password@localhost:5432/vector_db
@@ -79,6 +96,7 @@ PGVECTOR_TABLE=documents
 PDF_DATA_DIR=data
 REBUILD_VECTOR_INDEX=false
 STREAMLIT_PORT=8501
+API_PORT=8000
 ```
 
 If `POSTGRES_URL` is not set, the app uses the local Postgres settings above.
@@ -95,6 +113,12 @@ Then open:
 
 ```text
 http://127.0.0.1:8501
+```
+
+Backend health check:
+
+```text
+http://127.0.0.1:8000/health
 ```
 
 Start only Postgres with pgvector:
@@ -123,6 +147,12 @@ CREATE EXTENSION IF NOT EXISTS vector;
 The app also runs `CREATE EXTENSION IF NOT EXISTS vector` through LlamaIndex
 when the connected user has permission.
 
+The canonical database initialization SQL is documented in:
+
+```text
+infrastructure/migrations/001_create_vector_extension.sql
+```
+
 `EMBED_DIM` must match your embedding model. Use `3072` for
 `text-embedding-3-large`; use `1536` for `text-embedding-3-small` or
 `text-embedding-ada-002`.
@@ -135,14 +165,44 @@ Postgres vector table from the PDFs under `PDF_DATA_DIR`.
 Start the Streamlit app locally without Docker:
 
 ```powershell
-uv run streamlit run streamlit_app.py
+uv run streamlit run apps/web/streamlit_app.py
 ```
 
 Or run the CLI agent:
 
 ```powershell
-uv run python main.py
+uv run python apps/cli.py
 ```
+
+Run the FastAPI health service locally:
+
+```powershell
+uv run uvicorn apps.api.main:app --reload
+```
+
+## Quality Checks
+
+Install all dependency groups:
+
+```powershell
+uv sync --all-groups
+```
+
+Run lint, type checking, and tests:
+
+```powershell
+uv run ruff check .
+uv run mypy
+uv run pytest
+```
+
+Install pre-commit hooks:
+
+```powershell
+uv run pre-commit install
+```
+
+CI runs the same checks on pushes to `main` and on pull requests.
 
 ## Source Metadata
 

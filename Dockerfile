@@ -19,4 +19,4 @@ COPY . .
 
 EXPOSE 8501
 
-CMD [".venv/bin/streamlit", "run", "streamlit_app.py", "--server.address", "0.0.0.0", "--server.port", "8501", "--server.headless", "true"]
+CMD [".venv/bin/streamlit", "run", "apps/web/streamlit_app.py", "--server.address", "0.0.0.0", "--server.port", "8501", "--server.headless", "true"]
