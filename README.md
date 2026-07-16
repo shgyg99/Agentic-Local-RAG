@@ -3,8 +3,8 @@
 EvidenceFlow is a research-reading and note-taking application built with
 LlamaIndex, Streamlit, and PostgreSQL/pgvector. It is designed for working
 through academic papers: upload and index PDFs, ask grounded questions, save
-AI-assisted notes with their evidence, and use related papers to understand the
-direction and context of a research path.
+AI-assisted notes with their evidence, and compare related papers you add to
+understand the direction and context of a research path.
 
 The app is not a general-purpose chat tool. Its focus is helping researchers
 turn a collection of papers into a traceable understanding of the literature:
@@ -19,14 +19,15 @@ worth investigating next.
 
 - Streamlit workspace for reading papers, document Q&A, and note-taking
 - Paper-grounded Q&A for methods, findings, limitations, and terminology
-- FastAPI health-check service for backend readiness
+- FastAPI service with health-check and note endpoints
 - Optional CLI agent in `apps/cli.py`
 - OpenAI-compatible LLM configuration through `.env`
 - PostgreSQL/pgvector-backed PDF retrieval
 - SQLAlchemy domain model with project, document, chunk, citation, note, and job records
 - Page-aware and section-aware source metadata stored for every PDF chunk
 - Notes include the AI answer or selected answer text alongside its sources
-- Local note saving through a tool-backed `data/notes.txt` file
+- Local note storage in `data/notes.json`, plus a CLI note tool that can append
+  to `data/notes.txt`
 
 ## Project Structure
 
@@ -45,10 +46,9 @@ AI-agent/
 |   `-- migrations/
 |-- tests/
 |-- docs/
-|-- data/
-|   |-- Iran.pdf
-|   `-- notes.txt
+|-- data/                 # local PDFs and generated notes, gitignored
 |-- docker/
+|-- Screenshot.png
 |-- pyproject.toml
 `-- README.md
 ```
@@ -59,7 +59,7 @@ AI-agent/
 2. Ask questions about methods, results, limitations, and terminology while
    reading.
 3. Use the answers and retrieved evidence to clarify terminology and compare
-   the claims made across the reading set.
+   claims across the uploaded reading set.
 4. Save useful answers as notes. Each note keeps the AI answer and the source
    passages that support it.
 5. Compare the evidence across papers to identify related work, recurring
@@ -79,19 +79,20 @@ vector-store helpers. `packages/ingestion/pdf.py` loads every PDF under
 `PDF_DATA_DIR`, extracts text page by page, splits page text when common academic
 section headings are detected, and stores page and section metadata with each
 indexed document. It indexes only sources that are not already present in
-Postgres, and loads the existing vector table on later runs.
+Postgres, rebuilds when `REBUILD_VECTOR_INDEX=true` or the ingestion version
+changes, and loads the existing vector table on later runs.
 
 `packages/core/settings.py` validates environment-driven configuration with
 Pydantic Settings. `packages/core/logging_config.py` configures JSON structured
-logging. `apps/api/main.py` exposes `/health` and a global exception handler for
-backend readiness checks.
+logging. `apps/api/main.py` exposes `/health`, note create/list/export endpoints,
+and a global exception handler.
 
 ## Requirements
 
 - Python 3.12 or newer
 - `uv` for dependency management
 - PostgreSQL with the `pgvector` extension enabled
-- An OpenAI-compatible API key and model endpoint
+- An API key, chat model name, and optional OpenAI-compatible model endpoint
 
 ## Setup
 
@@ -105,7 +106,8 @@ Create a `.env` file in the project root:
 
 ```env
 API_KEY=your_api_key_here
-API_URL=https://your-openai-compatible-endpoint/v1
+# Optional when using the default OpenAI API.
+# API_URL=https://your-openai-compatible-endpoint/v1
 API_MODEL=your-chat-model
 EMBED_MODEL=text-embedding-3-large
 EMBED_DIM=3072
@@ -115,7 +117,7 @@ LOG_LEVEL=INFO
 LOG_FORMAT=json
 
 # Optional. If omitted, the app builds a local URL from the values below.
-# POSTGRES_URL=postgresql://postgres:your_real_password@localhost:5432/vector_db
+# POSTGRES_URL=postgresql://postgres:your_real_password@localhost:5433/vector_db
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5433
 POSTGRES_USER=postgres
@@ -132,7 +134,8 @@ API_PORT=8000
 
 If `POSTGRES_URL` is not set, the app uses the local Postgres settings above.
 The included Docker Compose service publishes Postgres on host port `5433` to
-avoid conflicts with a local Postgres installation on `5432`.
+avoid conflicts with a local Postgres installation on `5432`. Inside Docker,
+the app services connect to the `postgres` service on port `5432`.
 
 Start the full Docker stack:
 
@@ -175,9 +178,6 @@ CREATE DATABASE vector_db;
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-The app also runs `CREATE EXTENSION IF NOT EXISTS vector` through LlamaIndex
-when the connected user has permission.
-
 The canonical database initialization SQL is documented in:
 
 ```text
@@ -217,7 +217,7 @@ Or run the CLI agent:
 uv run python apps/cli.py
 ```
 
-Run the FastAPI health service locally:
+Run the FastAPI service locally:
 
 ```powershell
 uv run uvicorn apps.api.main:app --reload
@@ -247,11 +247,10 @@ uv run pre-commit install
 
 CI runs the same checks on pushes to `main` and on pull requests.
 
-## Source Metadata
-
 ## Domain Database Schema
 
-The Stage 2 domain schema includes:
+The domain schema in `infrastructure/migrations/` and
+`packages/domain/models.py` includes:
 
 - `users`
 - `research_projects`
@@ -278,8 +277,8 @@ Each PDF chunk stores metadata like this:
 
 ```python
 {
-    "source": "data/Iran.pdf",
-    "source_name": "Iran.pdf",
+    "source": "data/paper.pdf",
+    "source_name": "paper.pdf",
     "source_type": "pdf",
     "ingestion_version": "page_section_v1",
     "page_number": 4,
@@ -289,7 +288,7 @@ Each PDF chunk stores metadata like this:
     "section_title": "Methods",
     "section_type": "methods",
     "section_index": 5,
-    "source_label": "Iran.pdf, page 4, Methods",
+    "source_label": "paper.pdf, page 4, Methods",
 }
 ```
 
@@ -300,7 +299,9 @@ page, and section labels.
 
 ## Generated Files
 
-- `data/notes.txt`: saved notes from the note tool
+- `data/*.pdf`: local PDFs uploaded through Streamlit or placed under `PDF_DATA_DIR`
+- `data/notes.json`: notes created through Streamlit or the FastAPI note endpoints
+- `data/notes.txt`: notes appended by the CLI `note_saver` tool
 - `__pycache__/`: Python bytecode cache
 
 Do not commit `.env`, API keys, or private notes.
