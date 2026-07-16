@@ -8,6 +8,7 @@ from pypdf import PdfReader
 
 from vector_db import (
     clear_vector_store,
+    delete_indexed_source,
     env_flag,
     get_vector_store,
     indexed_ingestion_versions,
@@ -275,6 +276,36 @@ def extract_page_section_documents(file_path: Path) -> list[Document]:
 def pdf_paths() -> list[Path]:
     data_dir = pdf_data_dir()
     return sorted(path for path in data_dir.rglob("*.pdf") if path.is_file())
+
+
+def source_pdf_path(source: str) -> Path:
+    path = Path(source)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+
+    resolved_path = path.resolve()
+    data_dir = pdf_data_dir().resolve()
+    try:
+        resolved_path.relative_to(data_dir)
+    except ValueError as exc:
+        raise ValueError(
+            f"Refusing to delete {source!r} because it is outside {data_dir}."
+        ) from exc
+
+    return resolved_path
+
+
+def delete_pdf_source(source: str) -> tuple[bool, int]:
+    path = source_pdf_path(source)
+    vector_store = get_vector_store()
+    deleted_chunks = delete_indexed_source(vector_store, source)
+
+    deleted_file = False
+    if path.exists():
+        path.unlink()
+        deleted_file = True
+
+    return deleted_file, deleted_chunks
 
 
 def load_pdf_documents():

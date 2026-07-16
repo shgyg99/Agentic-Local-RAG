@@ -2,7 +2,7 @@ import os
 
 from llama_index.vector_stores.postgres import PGVectorStore
 from psycopg2 import connect, sql
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.engine import URL, make_url
 
 
@@ -153,3 +153,13 @@ def indexed_ingestion_versions(vector_store: PGVectorStore) -> set[str]:
         version_field = vector_store._table_class.metadata_["ingestion_version"].astext
         stmt = select(version_field).distinct()
         return {row[0] for row in session.execute(stmt) if row[0]}
+
+
+def delete_indexed_source(vector_store: PGVectorStore, source: str) -> int:
+    vector_store._initialize()
+    with vector_store._session() as session:
+        source_field = vector_store._table_class.metadata_["source"].astext
+        stmt = delete(vector_store._table_class).where(source_field == source)
+        result = session.execute(stmt)
+        session.commit()
+        return int(result.rowcount or 0)
