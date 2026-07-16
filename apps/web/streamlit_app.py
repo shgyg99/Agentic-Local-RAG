@@ -6,12 +6,22 @@ from packages.core.logging_config import configure_logging
 from packages.core.settings import get_settings
 from packages.ingestion.pdf import delete_pdf_source, get_query_engine, pdf_data_dir, pdf_paths
 from packages.llm.llama_index_settings import configure_llama_index
+from packages.notes.engine import (
+    answer_note_body,
+    create_note,
+    delete_note,
+    export_notes_markdown,
+    filter_notes,
+    list_notes,
+    update_note,
+)
 from packages.retrieval.vector_db import get_vector_store, indexed_sources
 
 settings = get_settings()
 configure_logging(settings)
 
 st.set_page_config(page_title=settings.app_name, layout="wide")
+DEFAULT_PROJECT_ID = "default"
 
 
 def save_uploaded_files(uploaded_files) -> tuple[list[Path], bool]:
@@ -97,6 +107,207 @@ def show_evidence(source_node, index: int) -> None:
         st.markdown(latex_friendly_markdown(source_node_text(source_node)))
 
 
+def parse_tags(value: str) -> list[str]:
+    return [tag.strip() for tag in value.split(",") if tag.strip()]
+
+
+def answer_paragraphs(answer: str) -> list[str]:
+    return [paragraph.strip() for paragraph in answer.split("\n\n") if paragraph.strip()]
+
+
+def citation_from_source_node(source_node) -> dict:
+    metadata = source_node.node.metadata or {}
+    return {
+        "source": metadata.get("source"),
+        "source_name": metadata.get("source_name"),
+        "source_label": source_label(metadata),
+        "page_start": metadata.get("page_start") or metadata.get("page_number"),
+        "page_end": metadata.get("page_end")
+        or metadata.get("page_start")
+        or metadata.get("page_number"),
+        "section_title": metadata.get("section_title"),
+        "quoted_evidence": source_node_text(source_node),
+    }
+
+
+def citation_options() -> dict[str, dict]:
+    citations = st.session_state.get("last_citations", [])
+    return {
+        f"{index}. {citation.get('source_label') or 'Source'}": citation
+        for index, citation in enumerate(citations, start=1)
+    }
+
+
+def create_note_from_answer() -> None:
+    answer = st.session_state.get("last_answer", "")
+    paragraphs = answer_paragraphs(answer)
+    paragraph_index = st.session_state.get("answer_note_paragraph", 0)
+    if not paragraphs:
+        st.warning("No answer is available to save.")
+        return
+    create_note(
+        project_id=DEFAULT_PROJECT_ID,
+        title=st.session_state.get("answer_note_title", "Answer note"),
+        body=answer_note_body(answer, paragraphs[paragraph_index]),
+        tags=parse_tags(st.session_state.get("answer_note_tags", "")),
+        citations=st.session_state.get("last_citations", []),
+        creation_method="selected_answer",
+        source_type="answer",
+    )
+    st.success("Answer saved as a note.")
+
+
+def create_note_from_citation(selected_label: str) -> None:
+    citation = citation_options().get(selected_label)
+    if not citation:
+        st.warning("Select a citation first.")
+        return
+    create_note(
+        project_id=DEFAULT_PROJECT_ID,
+        title=st.session_state.get("citation_note_title", "Citation note"),
+        body=citation.get("quoted_evidence", ""),
+        tags=parse_tags(st.session_state.get("citation_note_tags", "")),
+        citations=[citation],
+        creation_method="selected_citation",
+        source_type="citation",
+    )
+    st.success("Citation saved as a note.")
+
+
+def create_ai_summary_note() -> None:
+    answer = st.session_state.get("last_answer", "").strip()
+    if not answer:
+        st.warning("No answer is available to summarize.")
+        return
+    summary = answer_paragraphs(answer)[0] if answer_paragraphs(answer) else answer[:1200]
+    create_note(
+        project_id=DEFAULT_PROJECT_ID,
+        title="AI summary note",
+        body=answer_note_body(answer, summary),
+        tags=["summary"],
+        citations=st.session_state.get("last_citations", []),
+        creation_method="ai_summary",
+        source_type="answer",
+    )
+    st.success("AI summary note created.")
+
+
+def show_notes_panel() -> None:
+    st.header("Notes")
+
+    create_tab, saved_tab, export_tab = st.tabs(["Create", "Saved", "Export"])
+
+    with create_tab:
+        citation_map = citation_options()
+        with st.form("manual-note-form"):
+            st.subheader("Manual note")
+            title = st.text_input("Title", key="manual_note_title")
+            body = st.text_area("Body", key="manual_note_body", height=160)
+            tags = st.text_input("Tags", key="manual_note_tags", placeholder="tag1, tag2")
+            selected_citations = st.multiselect(
+                "Attach citations",
+                list(citation_map),
+                key="manual_note_citations",
+            )
+            submitted = st.form_submit_button("Save manual note")
+            if submitted:
+                create_note(
+                    project_id=DEFAULT_PROJECT_ID,
+                    title=title,
+                    body=body,
+                    tags=parse_tags(tags),
+                    citations=[citation_map[label] for label in selected_citations],
+                    creation_method="manual",
+                    source_type="manual",
+                )
+                st.success("Manual note saved.")
+
+        last_answer = st.session_state.get("last_answer", "")
+        paragraphs = answer_paragraphs(last_answer)
+        if paragraphs:
+            st.subheader("Save from latest answer")
+            st.text_input("Answer note title", value="Answer note", key="answer_note_title")
+            st.text_input("Answer note tags", key="answer_note_tags", placeholder="tag1, tag2")
+            st.selectbox(
+                "Paragraph",
+                range(len(paragraphs)),
+                format_func=lambda index: paragraphs[index][:120],
+                key="answer_note_paragraph",
+            )
+            if st.button("Save selected answer paragraph", width="stretch"):
+                create_note_from_answer()
+            if st.button("Create AI summary note", width="stretch"):
+                create_ai_summary_note()
+
+        if citation_map:
+            st.subheader("Save from citation")
+            selected_label = st.selectbox(
+                "Citation", list(citation_map), key="citation_note_source"
+            )
+            st.text_input("Citation note title", value="Citation note", key="citation_note_title")
+            st.text_input("Citation note tags", key="citation_note_tags", placeholder="tag1, tag2")
+            if st.button("Save selected citation", width="stretch"):
+                create_note_from_citation(selected_label)
+
+    with saved_tab:
+        notes = list_notes(DEFAULT_PROJECT_ID)
+        all_tags = sorted({tag for note in notes for tag in note.get("tags", [])})
+        search = st.text_input("Search notes")
+        tag = st.selectbox(
+            "Filter by tag", [""] + all_tags, format_func=lambda value: value or "All"
+        )
+        filtered_notes = filter_notes(notes, search=search, tag=tag)
+
+        if not filtered_notes:
+            st.caption("No notes found.")
+
+        for note in filtered_notes:
+            with st.expander(note.get("title", "Untitled note")):
+                st.caption(
+                    f"{note.get('creation_method', 'manual')} | {note.get('created_at', '')}"
+                )
+                title = st.text_input(
+                    "Edit title", value=note.get("title", ""), key=f"title-{note['id']}"
+                )
+                body = st.text_area(
+                    "Edit body",
+                    value=note.get("body", ""),
+                    key=f"body-{note['id']}",
+                    height=160,
+                )
+                tags = st.text_input(
+                    "Edit tags",
+                    value=", ".join(note.get("tags", [])),
+                    key=f"tags-{note['id']}",
+                )
+                if st.button("Save changes", key=f"save-{note['id']}"):
+                    update_note(note["id"], title=title, body=body, tags=parse_tags(tags))
+                    st.success("Note updated.")
+                if st.button("Delete note", key=f"delete-{note['id']}"):
+                    delete_note(note["id"])
+                    st.rerun()
+
+                citations = note.get("citations", [])
+                if citations:
+                    st.markdown("**Sources**")
+                    for index, citation in enumerate(citations, start=1):
+                        label = citation.get("source_label") or citation.get("source") or "Source"
+                        st.caption(f"{index}. {label}")
+                        if st.button("Open source", key=f"source-{note['id']}-{index}"):
+                            st.info(citation.get("quoted_evidence", "No quoted evidence stored."))
+
+    with export_tab:
+        markdown = export_notes_markdown(DEFAULT_PROJECT_ID)
+        st.download_button(
+            "Download Markdown notes",
+            data=markdown,
+            file_name="evidenceflow-notes.md",
+            mime="text/markdown",
+            width="stretch",
+        )
+        st.markdown(markdown or "No notes to export.")
+
+
 configure_llama_index()
 
 st.title(settings.app_name)
@@ -165,48 +376,74 @@ with st.sidebar:
     except Exception as exc:
         st.caption(f"Unable to read indexed sources: {exc}")
 
-query = st.chat_input("Ask a question about the indexed PDFs")
+chat_column, divider_column, notes_column = st.columns(
+    [0.64, 0.02, 0.34],
+    gap="small",
+    vertical_alignment="top",
+)
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+with chat_column:
+    query = st.chat_input("Ask a question about the indexed PDFs")
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-if query:
-    st.session_state.messages.append({"role": "user", "content": query})
-    with st.chat_message("user"):
-        st.markdown(query)
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-    with st.chat_message("assistant"):
-        try:
-            with st.spinner("Searching indexed PDFs..."):
-                response = get_query_engine().query(query)
+    if query:
+        st.session_state.messages.append({"role": "user", "content": query})
+        with st.chat_message("user"):
+            st.markdown(query)
 
-            answer = str(response)
-            st.markdown(answer)
+        with st.chat_message("assistant"):
+            try:
+                with st.spinner("Searching indexed PDFs..."):
+                    response = get_query_engine().query(query)
 
-            source_nodes = getattr(response, "source_nodes", [])
-            sources = []
-            for source_node in source_nodes:
-                metadata = source_node.node.metadata or {}
-                label = source_label(metadata)
-                if label and label not in sources:
-                    sources.append(label)
+                answer = str(response)
+                st.markdown(answer)
 
-            if sources:
-                with st.expander("Sources"):
-                    for source in sources:
-                        st.write(source)
+                source_nodes = getattr(response, "source_nodes", [])
+                st.session_state.last_answer = answer
+                st.session_state.last_citations = [
+                    citation_from_source_node(source_node) for source_node in source_nodes
+                ]
+                sources = []
+                for source_node in source_nodes:
+                    metadata = source_node.node.metadata or {}
+                    label = source_label(metadata)
+                    if label and label not in sources:
+                        sources.append(label)
 
-            if source_nodes:
-                with st.expander("Evidence text"):
-                    for index, source_node in enumerate(source_nodes, start=1):
-                        show_evidence(source_node, index)
+                if sources:
+                    with st.expander("Sources"):
+                        for source in sources:
+                            st.write(source)
 
-            st.session_state.messages.append({"role": "assistant", "content": answer})
-        except Exception as exc:
-            error = f"Unable to answer from the indexed PDFs: {exc}"
-            st.error(error)
-            st.session_state.messages.append({"role": "assistant", "content": error})
+                if source_nodes:
+                    with st.expander("Evidence text"):
+                        for index, source_node in enumerate(source_nodes, start=1):
+                            show_evidence(source_node, index)
+
+                st.session_state.messages.append({"role": "assistant", "content": answer})
+            except Exception as exc:
+                error = f"Unable to answer from the indexed PDFs: {exc}"
+                st.error(error)
+                st.session_state.messages.append({"role": "assistant", "content": error})
+
+with divider_column:
+    st.markdown(
+        """
+        <div style="
+            border-left: 1px solid rgba(49, 51, 63, 0.2);
+            height: calc(100vh - 150px);
+            margin: 0 auto;
+        "></div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with notes_column:
+    show_notes_panel()
