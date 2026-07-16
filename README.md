@@ -1,18 +1,31 @@
-# AI Agent
+# EvidenceFlow
 
-A small PDF RAG assistant built with LlamaIndex, Streamlit, and
-PostgreSQL/pgvector. Upload PDF files, store their embeddings in Postgres, and
-ask questions against the indexed documents.
+EvidenceFlow is a research-reading and note-taking application built with
+LlamaIndex, Streamlit, and PostgreSQL/pgvector. It is designed for working
+through academic papers: upload and index PDFs, ask grounded questions, save
+AI-assisted notes with their evidence, and use related papers to understand the
+direction and context of a research path.
+
+The app is not a general-purpose chat tool. Its focus is helping researchers
+turn a collection of papers into a traceable understanding of the literature:
+what each paper says, how methods and findings relate, and which questions are
+worth investigating next.
+
+## Screenshot
+
+![EvidenceFlow app screenshot](Screenshot.png)
 
 ## Features
 
-- Streamlit UI for PDF upload and document Q&A
+- Streamlit workspace for reading papers, document Q&A, and note-taking
+- Paper-grounded Q&A for methods, findings, limitations, and terminology
 - FastAPI health-check service for backend readiness
 - Optional CLI agent in `apps/cli.py`
 - OpenAI-compatible LLM configuration through `.env`
 - PostgreSQL/pgvector-backed PDF retrieval
 - SQLAlchemy domain model with project, document, chunk, citation, note, and job records
 - Page-aware and section-aware source metadata stored for every PDF chunk
+- Notes include the AI answer or selected answer text alongside its sources
 - Local note saving through a tool-backed `data/notes.txt` file
 
 ## Project Structure
@@ -39,6 +52,22 @@ AI-agent/
 |-- pyproject.toml
 `-- README.md
 ```
+
+## Research Workflow
+
+1. Add the papers relevant to a research topic.
+2. Ask questions about methods, results, limitations, and terminology while
+   reading.
+3. Use the answers and retrieved evidence to clarify terminology and compare
+   the claims made across the reading set.
+4. Save useful answers as notes. Each note keeps the AI answer and the source
+   passages that support it.
+5. Compare the evidence across papers to identify related work, recurring
+   methods, open gaps, and the next direction for the research.
+
+This workflow makes the connection between a note and its source explicit, so
+the resulting research trail remains reviewable rather than becoming a set of
+detached summaries.
 
 ## How It Works
 
