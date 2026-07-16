@@ -11,14 +11,22 @@ The API health endpoint runs on `http://127.0.0.1:8000/health`.
 
 ## Database initialization
 
-Docker Compose starts Postgres with pgvector enabled through
-`docker/postgres/init/001-create-vector-extension.sql`.
+Docker Compose starts Postgres and applies every SQL file under
+`infrastructure/migrations/` to fresh database volumes.
 
-The canonical migration file is:
+Run migrations manually against an existing database:
 
-```text
-infrastructure/migrations/001_create_vector_extension.sql
+```powershell
+uv run python scripts/run_migrations.py
 ```
+
+Seed one example project:
+
+```powershell
+uv run python scripts/seed_example_project.py
+```
+
+The domain ERD and deletion behavior are documented in `docs/domain_model.md`.
 
 ## Quality checks
 

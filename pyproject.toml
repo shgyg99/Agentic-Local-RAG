@@ -9,8 +9,10 @@ dependencies = [
     "llama-index>=0.14.23",
     "llama-index-vector-stores-postgres>=0.8.1",
     "pydantic-settings>=2.7.0",
+    "psycopg2-binary>=2.9.10",
     "pypdf>=6.14.2",
     "python-dotenv>=1.2.2",
+    "sqlalchemy>=2.0.36",
     "streamlit>=1.59.1",
     "uvicorn[standard]>=0.32.0",
 ]

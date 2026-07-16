@@ -8,9 +8,10 @@ ask questions against the indexed documents.
 
 - Streamlit UI for PDF upload and document Q&A
 - FastAPI health-check service for backend readiness
-- Optional CLI agent in `main.py`
+- Optional CLI agent in `apps/cli.py`
 - OpenAI-compatible LLM configuration through `.env`
 - PostgreSQL/pgvector-backed PDF retrieval
+- SQLAlchemy domain model with project, document, chunk, citation, note, and job records
 - Page-aware and section-aware source metadata stored for every PDF chunk
 - Local note saving through a tool-backed `data/notes.txt` file
 
@@ -25,6 +26,7 @@ AI-agent/
 |   |-- ingestion/
 |   |-- retrieval/
 |   |-- llm/
+|   |-- domain/
 |   `-- evaluation/
 |-- infrastructure/
 |   `-- migrations/
@@ -150,7 +152,19 @@ when the connected user has permission.
 The canonical database initialization SQL is documented in:
 
 ```text
-infrastructure/migrations/001_create_vector_extension.sql
+infrastructure/migrations/
+```
+
+Run migrations manually against an existing database:
+
+```powershell
+uv run python scripts/run_migrations.py
+```
+
+Seed a demo user and project:
+
+```powershell
+uv run python scripts/seed_example_project.py
 ```
 
 `EMBED_DIM` must match your embedding model. Use `3072` for
@@ -203,6 +217,31 @@ uv run pre-commit install
 ```
 
 CI runs the same checks on pushes to `main` and on pull requests.
+
+## Source Metadata
+
+## Domain Database Schema
+
+The Stage 2 domain schema includes:
+
+- `users`
+- `research_projects`
+- `documents`
+- `document_pages`
+- `document_sections`
+- `chunks`
+- `conversations`
+- `messages`
+- `citations`
+- `notes`
+- `processing_jobs`
+
+See [docs/domain_model.md](docs/domain_model.md) for the ERD, duplicate document
+constraint, and deletion behavior.
+
+The SQLAlchemy repository layer lives in
+`packages/domain/repositories.py`. Unit tests cover duplicate document detection,
+project cascade deletion, and citation traceability.
 
 ## Source Metadata
 

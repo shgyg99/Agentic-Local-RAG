@@ -2,7 +2,13 @@
 
 Development infrastructure is defined in `docker-compose.yml`.
 
-Database initialization currently consists of enabling the PostgreSQL `vector`
-extension. The SQL migration is mirrored in
-`infrastructure/migrations/001_create_vector_extension.sql` and in the Docker
-Postgres init folder so new local databases are initialized automatically.
+Database initialization is defined by ordered SQL migrations in
+`infrastructure/migrations/`.
+
+Docker Compose mounts this folder into Postgres as
+`/docker-entrypoint-initdb.d`, so a fresh development database applies the
+migrations automatically. For an existing database, run:
+
+```powershell
+uv run python scripts/run_migrations.py
+```
