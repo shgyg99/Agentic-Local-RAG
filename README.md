@@ -10,7 +10,7 @@ ask questions against the indexed documents.
 - Optional CLI agent in `main.py`
 - OpenAI-compatible LLM configuration through `.env`
 - PostgreSQL/pgvector-backed PDF retrieval
-- Source metadata stored for every PDF chunk
+- Page-aware and section-aware source metadata stored for every PDF chunk
 - Local note saving through a tool-backed `data/notes.txt` file
 
 ## Project Structure
@@ -37,8 +37,9 @@ AI-agent/
 PDF indexing flow.
 
 `vector_db.py` owns the PostgreSQL/pgvector connection and vector-store helpers.
-`pdf.py` loads every PDF under `PDF_DATA_DIR`, adds `source`, `source_name`, and
-`source_type` metadata to each document, indexes only sources that are not
+`pdf.py` loads every PDF under `PDF_DATA_DIR`, extracts text page by page, splits
+page text when common academic section headings are detected, and stores page and
+section metadata with each indexed document. It indexes only sources that are not
 already present in Postgres, and loads the existing vector table on later runs.
 
 ## Requirements
@@ -152,8 +153,22 @@ Each PDF chunk stores metadata like this:
     "source": "data/Iran.pdf",
     "source_name": "Iran.pdf",
     "source_type": "pdf",
+    "ingestion_version": "page_section_v1",
+    "page_number": 4,
+    "page_start": 4,
+    "page_end": 4,
+    "page_count": 12,
+    "section_title": "Methods",
+    "section_type": "methods",
+    "section_index": 5,
+    "source_label": "Iran.pdf, page 4, Methods",
 }
 ```
+
+Section detection covers common academic headings including Abstract,
+Introduction, Methods, Results, Discussion, Conclusion, Limitations, and
+References. The Streamlit source panel renders retrieved evidence as document,
+page, and section labels.
 
 ## Generated Files
 

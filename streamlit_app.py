@@ -1,6 +1,10 @@
+import base64
+import html
+import re
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from llm_settings import configure_llama_index
 from pdf import get_query_engine, pdf_data_dir, pdf_paths
@@ -8,6 +12,8 @@ from vector_db import get_vector_store, indexed_sources
 
 
 st.set_page_config(page_title="PDF RAG", layout="wide")
+
+PDF_PREVIEW_MAX_BYTES = 25 * 1024 * 1024
 
 
 def save_uploaded_files(uploaded_files) -> tuple[list[Path], bool]:
@@ -38,6 +44,120 @@ def show_indexing_error(exc: Exception) -> None:
     st.error(str(exc))
     if exc.__cause__:
         st.caption(f"Cause: {exc.__cause__}")
+
+
+def source_label(metadata: dict) -> str | None:
+    source = metadata.get("source_name") or metadata.get("source")
+    if not source:
+        return None
+
+    page_start = metadata.get("page_start") or metadata.get("page_number")
+    page_end = metadata.get("page_end") or page_start
+    section_title = metadata.get("section_title")
+
+    parts = [str(source)]
+    if page_start and page_end and page_start != page_end:
+        parts.append(f"pages {page_start}-{page_end}")
+    elif page_start:
+        parts.append(f"page {page_start}")
+    if section_title:
+        parts.append(str(section_title))
+    return " | ".join(parts)
+
+
+def source_pdf_path(metadata: dict) -> Path | None:
+    source = metadata.get("source")
+    if not source:
+        return None
+
+    path = Path(str(source))
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path if path.exists() else None
+
+
+def source_node_text(source_node) -> str:
+    node = source_node.node
+    try:
+        return node.get_content(metadata_mode="none")
+    except TypeError:
+        return node.get_content()
+    except AttributeError:
+        return getattr(node, "text", "")
+
+
+def highlighted_text_html(text: str, query: str) -> str:
+    escaped_text = html.escape(text)
+    terms = []
+    for term in re.findall(r"[\w\u0600-\u06FF]{3,}", query):
+        normalized = term.casefold()
+        if normalized not in terms:
+            terms.append(normalized)
+
+    if terms:
+        pattern = re.compile(
+            "|".join(re.escape(html.escape(term)) for term in sorted(terms, key=len, reverse=True)),
+            re.IGNORECASE,
+        )
+        escaped_text = pattern.sub(lambda match: f"<mark>{match.group(0)}</mark>", escaped_text)
+
+    return escaped_text.replace("\n", "<br>")
+
+
+def show_pdf_preview(path: Path, page_number) -> None:
+    if path.stat().st_size > PDF_PREVIEW_MAX_BYTES:
+        st.info("PDF is too large for inline preview.")
+        with path.open("rb") as file:
+            pdf_bytes = file.read()
+        st.download_button(
+            "Open downloaded PDF",
+            data=pdf_bytes,
+            file_name=path.name,
+            mime="application/pdf",
+            use_container_width=True,
+        )
+        return
+
+    page = int(page_number or 1)
+    with path.open("rb") as file:
+        encoded_pdf = base64.b64encode(file.read()).decode("ascii")
+
+    components.html(
+        f"""
+        <iframe
+            src="data:application/pdf;base64,{encoded_pdf}#page={page}"
+            width="100%"
+            height="620"
+            style="border: 1px solid #ddd; border-radius: 6px;"
+            type="application/pdf">
+        </iframe>
+        """,
+        height=640,
+    )
+
+
+def show_evidence(source_node, query: str, index: int) -> None:
+    metadata = source_node.node.metadata or {}
+    label = source_label(metadata) or f"Evidence {index}"
+    score = getattr(source_node, "score", None)
+    score_label = f" - score {score:.3f}" if isinstance(score, float) else ""
+
+    with st.expander(f"{index}. {label}{score_label}"):
+        st.markdown(
+            f"""
+            <div style="line-height:1.65; padding:0.75rem; border:1px solid #e5e7eb; border-radius:6px;">
+                {highlighted_text_html(source_node_text(source_node), query)}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        pdf_path = source_pdf_path(metadata)
+        if pdf_path:
+            st.caption(f"PDF preview: {pdf_path.name}, page {metadata.get('page_start') or metadata.get('page_number') or 1}")
+            show_pdf_preview(pdf_path, metadata.get("page_start") or metadata.get("page_number"))
+        else:
+            st.caption("PDF file was not found locally for preview.")
 
 
 configure_llama_index()
@@ -117,17 +237,23 @@ if query:
             answer = str(response)
             st.markdown(answer)
 
+            source_nodes = getattr(response, "source_nodes", [])
             sources = []
-            for source_node in getattr(response, "source_nodes", []):
+            for source_node in source_nodes:
                 metadata = source_node.node.metadata or {}
-                source = metadata.get("source")
-                if source and source not in sources:
-                    sources.append(source)
+                label = source_label(metadata)
+                if label and label not in sources:
+                    sources.append(label)
 
             if sources:
                 with st.expander("Sources"):
                     for source in sources:
                         st.write(source)
+
+            if source_nodes:
+                with st.expander("Evidence text and PDF pages"):
+                    for index, source_node in enumerate(source_nodes, start=1):
+                        show_evidence(source_node, query, index)
 
             st.session_state.messages.append({"role": "assistant", "content": answer})
         except Exception as exc:

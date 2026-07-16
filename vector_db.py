@@ -145,3 +145,11 @@ def indexed_sources(vector_store: PGVectorStore) -> set[str]:
         source_field = vector_store._table_class.metadata_["source"].astext
         stmt = select(source_field).distinct()
         return {row[0] for row in session.execute(stmt) if row[0]}
+
+
+def indexed_ingestion_versions(vector_store: PGVectorStore) -> set[str]:
+    vector_store._initialize()
+    with vector_store._session() as session:
+        version_field = vector_store._table_class.metadata_["ingestion_version"].astext
+        stmt = select(version_field).distinct()
+        return {row[0] for row in session.execute(stmt) if row[0]}
